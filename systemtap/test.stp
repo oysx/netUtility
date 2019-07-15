@@ -1,0 +1,127 @@
+#! /usr/bin/env stap
+
+global record%
+global myport=51973
+
+probe begin {
+    log("Printing tcp retransmission")
+}
+
+#####################################
+
+function tcp_get_info_ca_state:long(sock:long)
+%{
+	struct sock *sk = (struct sock *)(long) STAP_ARG_sock;
+	const struct inet_connection_sock *icsk = inet_csk(sk);
+	STAP_RETVALUE = icsk->icsk_ca_state;
+	CATCH_DEREF_FAULT();
+%}
+
+#checkdport/checksport: 0 for don't care
+#skb: 0 for can't provided
+#$return: -1 for not my flow
+function vi_show_socket_info:long(sk, skb, checksport, checkdport)
+{
+    saddr   = format_ipaddr(__ip_sock_saddr(sk), __ip_sock_family(sk))
+    sport   = __tcp_sock_sport(sk)
+    dport   = __tcp_sock_dport(sk)
+
+    if((checksport != 0 && checksport != sport) || (checkdport != 0) && (checkdport != dport)){
+        return -1
+    }
+
+    rto = tcp_get_info_rto(sk)
+    snd_cwnd= tcp_get_info_snd_cwnd(sk)
+    ca_state= tcp_get_info_ca_state(sk)
+    state = tcp_ts_get_info_state(sk)
+    rcv_wup=@cast(sk, "tcp_sock")->rcv_wup
+    rcv_wnd=@cast(sk, "tcp_sock")->rcv_wnd
+    rcv_nxt=@cast(sk, "tcp_sock")->rcv_nxt
+
+    if(skb != 0){
+        cb=@cast(skb, "sk_buff")->cb
+        seq=@cast(cb, "tcp_skb_cb")->seq
+        end_seq=@cast(cb, "tcp_skb_cb")->end_seq
+    }else{
+        seq = 0
+        end_seq = 0
+    }
+
+    printf("%s: %s:%d => %d STATE:%s RTO:%d (ms), snd_cwnd=%d, ca_state=%ld\n", pn(), saddr, sport,
+                dport, tcp_sockstate_str(state), rto/1000, snd_cwnd, ca_state)
+
+#    print_backtrace()
+
+    return 0
+}
+
+function __tcp_rto_track(sk)
+{
+    rto = tcp_get_info_rto(sk)
+    saddr   = format_ipaddr(__ip_sock_saddr(sk), __ip_sock_family(sk))
+    sport   = __tcp_sock_sport(sk)
+    dport   = __tcp_sock_dport(sk)
+
+    lastrto = record[saddr, sport, dport]
+    if (lastrto != rto) {
+        if (lastrto) {
+            printf("%s:%d => %d STATE:%s RTO:%d -> %d (ms)\n", saddr, sport,
+                dport, tcp_sockstate_str(state), lastrto/1000, rto/1000)
+        } else {
+            printf("%s:%d => %d STATE:%s RTO:%d (ms)\n", saddr, sport,
+                dport, tcp_sockstate_str(state), rto/1000)
+        }
+    }
+    record[saddr, sport, dport] = rto
+}
+
+#####################################
+
+#probe kernel.function("tcp_transmit_skb") {
+probe kernel.function("tcp_retransmit_skb") {
+    myflow = vi_show_socket_info($sk, 0, 7002, 0)
+    if(myflow != -1){
+        __tcp_rto_track($sk)
+    }
+}
+
+probe kernel.function("tcp_rcv_established") {
+    vi_show_socket_info($sk, 0, myport, 0)
+}
+
+probe kernel.function("tcp_ack") {
+    vi_show_socket_info($sk, 0, myport, 0)
+}
+
+#probe kernel.function("tcp_ack").return {
+#   sport   = __tcp_sock_sport($sk)
+#   if(sport==myport){
+#       printf("ack.ret=%d\n", $return)
+#   }
+#}
+
+probe kernel.function("tcp_data_queue") {
+#probe kernel.function("sock_def_readable") {
+    vi_show_socket_info($sk, $skb, myport, 0)
+}
+
+probe kernel.function("sk_stream_kill_queues"){
+    vi_show_socket_info($sk, 0, 7002, 0)
+}
+
+probe kernel.function("inet_csk_prepare_forced_close"){
+    vi_show_socket_info($sk, 0, 7002, 0)
+}
+
+probe kernel.function("sk_common_release"){
+    vi_show_socket_info($sk, 0, 7002, 0)
+}
+
+probe kernel.function("inet_csk_listen_stop"){
+    vi_show_socket_info($sk, 0, 7002, 0)
+}
+
+#probe kernel.function("tcp_write_xmit") {
+#    vi_show_socket_info($sk, 0, 0, 12345)
+#}
+

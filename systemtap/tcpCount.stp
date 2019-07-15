@@ -1,0 +1,257 @@
+#! /usr/bin/env stap
+
+global gIfIndex=3
+global gServerPort=9999
+global gServerIp=0xc0a8fb4f
+global gClientIp=0xc0a8fb2a
+
+global tcpBytes
+global flowBytes
+global flowPackets
+global devBytes
+global devPackets
+
+#####################################
+
+function __ip_skb_frag:long (iphdr)
+{
+        return @cast(iphdr, "iphdr", "kernel<linux/ip.h>")->frag_off & htons(0x3FFF)
+}
+
+function __ip_skb_tot_len:long(iphdr)
+{
+        return ntohs(@cast(iphdr, "iphdr", "kernel<linux/ip.h>")->tot_len)
+}
+
+function vi_get_skb_mac:long(skb:long, offset:long)
+%{
+        struct sk_buff *skb = (struct sk_buff *)STAP_ARG_skb;
+        long off = STAP_ARG_offset;
+        long ret;
+
+        unsigned char *p;
+        if(skb_mac_header_was_set(skb))
+                p = skb_mac_header(skb);
+        else
+                p = skb_network_header(skb) - 14;
+
+        ret = ((long)p[0+off])<<40 | ((long)p[1+off])<<32 | ((long)p[2+off])<<24 | ((long)p[3+off])<<16 | ((long)p[4+off])<<8 | ((long)p[5+off]);
+        STAP_RETVALUE = ret;
+%}
+
+function vi_get_ifindex:long(name:string)
+%{
+        const char *name = (const char*)STAP_ARG_name;
+        long ifindex = -1;
+        struct net_device * net = dev_get_by_name(&init_net, name);
+        if(net){
+                ifindex = net->ifindex;
+                dev_put(net);
+        }
+
+        STAP_RETVALUE = ifindex;
+%}
+
+function vi__get_iphdr_tcphdr:long(iphdr:long)
+{
+        ihl=@cast(iphdr, "iphdr", "kernel<linux/ip.h>")->ihl
+        tcphdr = iphdr + ihl * 4
+        return tcphdr
+}
+
+#this function can only be used at boundary between NIC driver and Linux-Network!
+#type: 0 for output, 1 for input
+function videv__get_skb_iphdr:long(skb:long, type:long)
+{
+	nwhr = @cast(skb, "sk_buff")->network_header
+        if(type==1 && nwhr==0){ #workaround for some NIC driver
+	        iphdr = @cast(skb, "sk_buff")->data
+        }else{
+                iphdr = __get_skb_iphdr(skb)
+        }
+        return iphdr
+}
+
+#$return: 0: client->server, 1: server->client, -1: not my flow
+function vi_get_iphdr_dir:long(iphdr:long)
+{
+        proto = __ip_skb_proto(iphdr)
+        if(proto != 0x06) {     #only for TCP packets
+                return -1
+        }
+
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+        tcphdr = vi__get_iphdr_tcphdr(iphdr)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+        if(sport==gServerPort && saddr==htonl(gServerIp) && daddr==htonl(gClientIp)) {
+                dir = 1
+        } else if(dport==gServerPort && daddr==htonl(gServerIp) && saddr==htonl(gClientIp)) {
+                dir = 0
+        } else {
+                dir = -1
+        }
+        return dir
+}
+
+#$return: -1: not my flow, other: client TCP port number
+function vi_get_skb_client_port:long(skb:long)
+{
+        iphdr = __get_skb_iphdr(skb)
+        proto = __ip_skb_proto(iphdr)
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+
+        if(proto != 0x06) {
+                return -1
+        }
+
+        tcphdr = __get_skb_tcphdr(skb)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+
+        if(sport==gServerPort && saddr==htonl(gServerIp) && daddr==htonl(gClientIp)) {
+                clientPort = dport
+        } else if(dport==gServerPort && daddr==htonl(gServerIp) && saddr==htonl(gClientIp)) {
+                clientPort = sport
+        } else {
+                clientPort = -1
+        }
+        return clientPort
+}
+
+function vi_stat_dev(skb:long, type:long, ifidx:long) {
+        ptype = ntohs(@cast(skb, "sk_buff")->protocol)
+        if(ptype == 0x0800){    #only for IP packets
+                ifindex = @cast(skb, "sk_buff")->dev->ifindex
+                if(ifindex == ifidx){
+                        iphdr = videv__get_skb_iphdr(skb, type)
+                        dir = vi_get_iphdr_dir(iphdr)
+                        if(dir == -1) {
+                                return -1
+                        }
+
+                        len = @cast(skb, "sk_buff")->len
+                        if(type == 0) {
+                                if(len<60) { len=60 }   #pad for ethernet minimum size 60 by NIC driver
+                                devBytes[type] += len - 14   #decrease MAC header and ETHERTYPE 
+                        } else {
+                                devBytes[type] += len   #this len is not account for MAC header and ETHERTYPE
+                        }
+
+                        devPackets[type] += 1
+                        vi_show_skb_info_limit(type, skb, iphdr)
+                }
+        }
+}
+
+global limit_count = 0
+function vi_show_skb_info_limit(type:long, skb:long, iphdr:long)
+{
+        if(limit_count < 10){
+                limit_count += 1
+                vi_show_skb_info(type, skb, iphdr)
+        }
+}
+
+# type: 0 for output, 1 for input
+function vi_show_skb_info(type:long, skb:long, iphdr:long)
+{
+        head = @cast(skb, "sk_buff")->head
+        data = @cast(skb, "sk_buff")->data
+        thdr = @cast(skb, "sk_buff")->transport_header
+        nhdr = @cast(skb, "sk_buff")->network_header
+        mhdr = @cast(skb, "sk_buff")->mac_header
+        len = @cast(skb, "sk_buff")->len
+
+        ifindex = @cast(skb, "sk_buff")->dev->ifindex
+        printf("type=%d, ifindex=%d, head=%p, data=%p, transport_header=%d, network_header=%d, mac_header=%d, skb->len=%ld\n", type, ifindex, head, data, thdr, nhdr, mhdr, len)
+
+        dmac = vi_get_skb_mac(skb, 0)
+        smac = vi_get_skb_mac(skb, 6)
+        proto = __ip_skb_proto(iphdr)
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+
+        tcphdr = vi__get_iphdr_tcphdr(iphdr)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+        printf("\t dmac=%lx, smac=%lx, proto=%d, saddr=%x, daddr=%x, sport=%d, dport=%d\n", dmac, smac, proto, saddr, daddr, sport, dport)
+}
+
+function vi_stat_tcp(skb, type){
+        port = vi_get_skb_client_port(skb)
+        if(port != -1){
+                len = @cast(skb, "sk_buff")->len
+                flowBytes[type, port] += len
+                flowPackets[type, port] += 1
+                tcpBytes[type] += len
+        }
+}
+
+#####################################
+
+probe kernel.function("__netif_receive_skb") {
+        vi_stat_dev($skb, 1, gIfIndex)
+}
+
+probe kernel.function("dev_queue_xmit") {
+	vi_stat_dev($skb, 0, gIfIndex)
+}
+
+#probe kernel.function("ip_rcv") {
+#probe kernel.function("tcp_v4_rcv") {
+probe kernel.function("ip_local_deliver") {
+        vi_stat_tcp($skb, 1)
+}
+
+#probe kernel.function("tcp_transmit_skb") {
+#probe kernel.function("tcp_v4_send_ack") {
+#probe kernel.function("tcp_v4_send_reset") {
+#probe kernel.function("ip_build_and_send_pkt") {
+#probe kernel.function("ip_output") {
+probe kernel.function("ip_local_out_sk") {
+#probe kernel.function("__ip_local_out") {
+        vi_stat_tcp($skb, 0)
+}
+
+#####################################
+
+function vi_typename:string(type:long)
+{
+        return (type in typename ? typename[type] : "INVALID")
+}
+
+global typename[2]
+probe begin {
+        typename[0] = "output"
+        typename[1] = "input"
+        
+        gIfIndex = vi_get_ifindex("eth0")
+
+        log("Printing tcp statistic")
+}
+
+probe timer.sec(5)
+{
+	printf("%ld, %ld, %ld devrcv, %ld devsnd, %ld bytes rcv, %ld bytes snd\n", devPackets[1], devPackets[0], devBytes[1], devBytes[0], tcpBytes[1], tcpBytes[0])
+}
+
+global totalBytes
+global totalPkts
+probe end{
+        printf("flows:\n")
+        foreach([type, port] in flowBytes){
+                totalBytes[type] += flowBytes[type, port]
+                printf("%s: port=%ld, bytes=%ld\n", vi_typename(type), port, flowBytes[type, port])
+        }
+        foreach([type, port] in flowPackets){
+                totalPkts[type] += flowPackets[type, port]
+                printf("%s: port=%ld, bytes=%ld\n", vi_typename(type), port, flowPackets[type, port])
+        }
+
+        printf("\nrcvBytes: %ld, rcvPkts %ld, sndBytes:%ld, sndPkts %ld\n", totalBytes[1], totalPkts[1], totalBytes[0], totalPkts[0])
+        printf("dev: snd=%ld, rcv=%ld\n", devBytes[0], devBytes[1])
+}
+

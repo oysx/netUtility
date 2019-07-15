@@ -1,0 +1,39 @@
+#! /usr/bin/env stap
+
+#################################################################
+# tcp_retransmit.stp
+# Author: Yang Bingwu (detailyang) <detailyang@gmail.com>
+# This systemtap script will prints the tcp retransmission packet
+#################################################################
+
+probe begin {
+    log("Printing tcp retransmission")
+}
+
+function tcp_get_info_ca_state:long(sock:long)
+%{
+        struct sock *sk = (struct sock *)(long) STAP_ARG_sock;
+        const struct inet_connection_sock *icsk = inet_csk(sk);
+        STAP_RETVALUE = icsk->icsk_ca_state;
+        CATCH_DEREF_FAULT();
+%}
+
+#probe kernel.function("tcp_retrans_try_collapse") {
+probe kernel.statement(0xffffffff81708cfd) {
+#probe kernel.statement("*@net/ipv4/tcp_output.c:2559") {
+#probe kernel.function("tcp_retransmit_skb") {
+
+    sport   = __tcp_sock_sport($sk)
+    dport   = __tcp_sock_dport($sk)
+if(dport==9999){#sport==9999
+    rto = tcp_get_info_rto($sk)
+    state = tcp_ts_get_info_state($sk)
+    snd_cwnd= tcp_get_info_snd_cwnd($sk)
+    ca_state= tcp_get_info_ca_state($sk)
+
+myHZ=HZ()
+    printf("%ld: %d => %d %s snd_cwnd=%d, ca_state=%d, rto=%ld\n", jiffies()/myHZ, sport,
+                dport, tcp_sockstate_str(state), snd_cwnd, ca_state, rto/1000)
+    }
+}
+

@@ -1,0 +1,26 @@
+global inject, ka_cnt
+
+probe procfs("cnt").read {
+$value = sprintf("%d\n", ka_cnt);
+}
+probe procfs("inject").write {
+inject= $value;
+printf("inject count %d, ka %s", ka_cnt, inject);
+}
+
+probe vfs.read.return,
+vfs.write.return {
+if ($return &&
+devname == @1 &&
+inject == "on\n")
+{
+ka_cnt++;
+udelay($2);
+}
+}
+
+probe begin{
+println("ik module begin:)");
+}
+
+

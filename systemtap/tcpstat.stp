@@ -1,0 +1,32 @@
+global tcp_cur_est, tcp_retrans_fail, tcp_retrans
+
+probe begin {
+	printf("port: count\n");
+}
+
+probe kernel.function("tcp_set_state")
+{
+	dport = $sk->__sk_common.skc_dport
+	/* sport = $sk->__sk_common.skc_num */
+
+	/* TCP_ESTABLISHED=1, */
+        if ($state == 1 && $sk->sk_state != 1) {
+		tcp_cur_est[dport]++
+        }else if ($state != 1 && $sk->sk_state == 1) {
+		tcp_cur_est[dport]--
+	}
+}
+
+probe kernel.function("tcp_retransmit_skb").return
+{
+        dport = $sk->__sk_common.skc_dport
+
+        $return ? tcp_retrans_fail[dport]++ : tcp_retrans[dport]++
+}
+
+probe timer.ms(1000)
+{
+	foreach (port in tcp_cur_est) {
+		printf("%5d: %8d,%8d\n", port, tcp_cur_est[port], tcp_retrans[port], tcp_retrans_fail[port]);
+	}
+}

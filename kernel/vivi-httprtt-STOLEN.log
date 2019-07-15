@@ -1,0 +1,30 @@
+[26297.300818] HDR:8000->64946, FIN=0, rto=1000, state=10, ca=0, reTS=0, rtt=0, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=10, pcount=1,  data=[] 
+[26297.302014] HDR:64946->8000, FIN=0, rto=0, state=255, ca=255, reTS=0, rtt=0, bkoff=255, prbout=255, retrans=255, pktfly=0, cwnd=255, pcount=0,  data=[] 
+[26297.310866] REQ:64946->8000, FIN=0, rto=0, state=255, ca=255, reTS=0, rtt=0, bkoff=255, prbout=255, retrans=255, pktfly=0, cwnd=255, pcount=0,  data=[GET ] 
+[26297.312144] HDR:8000->64946, FIN=0, rto=208, state=1, ca=0, reTS=0, rtt=64, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=10, pcount=1,  data=[] (drop)
+[26297.322880] RSP:8000->64946, FIN=0, rto=208, state=1, ca=0, reTS=0, rtt=64, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=10, pcount=2,  data=[HTTP] (drop)
+[26297.323855] RSP:8000->64946, FIN=0, rto=208, state=1, ca=0, reTS=0, rtt=64, bkoff=0, prbout=0, retrans=0, pktfly=2, cwnd=10, pcount=1,  data=[UT\xffffffbd{] 
+[26297.325346] RSP:8000->64946, FIN=0, rto=208, state=1, ca=0, reTS=0, rtt=64, bkoff=0, prbout=0, retrans=0, pktfly=3, cwnd=10, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26297.325468] HDR:64946->8000, FIN=0, rto=208, state=1, ca=0, reTS=0, rtt=64, bkoff=0, prbout=0, retrans=0, pktfly=3, cwnd=10, pcount=0,  data=[] 
+[26297.528113] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=4, cwnd=1, pcount=1,  data=[HTTP] (drop)
+[26297.934899] RSP:8000->64946, FIN=0, rto=408, state=1, ca=4, reTS=256504224, rtt=60, bkoff=1, prbout=0, retrans=1, pktfly=4, cwnd=1, pcount=1,  data=[HTTP] 
+[26297.937884] HDR:64946->8000, FIN=0, rto=816, state=1, ca=4, reTS=256504224, rtt=60, bkoff=2, prbout=0, retrans=2, pktfly=4, cwnd=1, pcount=0,  data=[] 
+[26297.939859] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=3, cwnd=2, pcount=1,  data=[] (drop)
+[26297.941662] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=3, cwnd=2, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26298.142634] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=3, cwnd=1, pcount=1,  data=[] 
+[26298.145769] HDR:64946->8000, FIN=0, rto=408, state=1, ca=4, reTS=256504224, rtt=60, bkoff=1, prbout=0, retrans=1, pktfly=3, cwnd=1, pcount=0,  data=[] 
+[26298.147673] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=3, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26298.149590] HDR:64946->8000, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=3, pcount=0,  data=[] 
+[26298.350395] RSP:8000->64946, FIN=0, rto=204, state=1, ca=4, reTS=256504224, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=1, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26298.758041] RSP:8000->64946, FIN=0, rto=408, state=1, ca=4, reTS=256504224, rtt=60, bkoff=1, prbout=0, retrans=1, pktfly=1, cwnd=1, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26299.577030] RSP:8000->64946, FIN=0, rto=816, state=1, ca=4, reTS=256504224, rtt=60, bkoff=2, prbout=0, retrans=2, pktfly=1, cwnd=1, pcount=1,  data=[\x17\xffffff8fJ3] (drop)
+[26301.211369] RSP:8000->64946, FIN=0, rto=1632, state=1, ca=4, reTS=256504224, rtt=60, bkoff=3, prbout=0, retrans=3, pktfly=1, cwnd=1, pcount=1,  data=[\x17\xffffff8fJ3] 
+[26301.214622] HDR:64946->8000, FIN=0, rto=3264, state=1, ca=4, reTS=256504224, rtt=60, bkoff=4, prbout=0, retrans=4, pktfly=1, cwnd=1, pcount=0,  data=[] 
+[26301.228994] REQ:64946->8000, FIN=0, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=2, pcount=0,  data=[GET ] 
+[26301.233124] RSP:8000->64946, FIN=0, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=2, pcount=1,  data=[HTTP] 
+[26301.234388] HDR:64946->8000, FIN=0, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=2, pcount=0,  data=[] 
+[26301.236106] RSP:8000->64946, FIN=0, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=3, pcount=1,  data=[0
+[26301.238272] HDR:64946->8000, FIN=0, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=3, pcount=0,  data=[] 
+[26301.239200] HDR:64946->8000, FIN=1, rto=204, state=1, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=3, pcount=0,  data=[] 
+[26301.240437] HDR:8000->64946, FIN=1, rto=204, state=9, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=0, cwnd=3, pcount=1,  data=[] 
+[26301.242062] HDR:64946->8000, FIN=0, rto=204, state=9, ca=0, reTS=0, rtt=60, bkoff=0, prbout=0, retrans=0, pktfly=1, cwnd=3, pcount=0,  data=[] 

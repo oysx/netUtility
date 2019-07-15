@@ -1,0 +1,272 @@
+#! /usr/bin/env stap
+
+global gIfIndex=3
+global gServerPort=9999
+
+global tcpRcv=0
+global tcpSnd=0
+global gServerIp=0x4ffba8c0
+global gClientIp=0x2afba8c0
+#global gServerIp=0xc0a8fb4f
+#global gClientIp=0xc0a8fb2a
+global mycountrcv
+global mycountsnd
+global mypktrcv
+global mypktsnd
+#global myack
+#global myshort
+#global myfrag
+
+probe begin {
+        log("Printing tcp retransmission")
+}
+
+function __ip_skb_frag:long (iphdr)
+{
+        return @cast(iphdr, "iphdr", "kernel<linux/ip.h>")->frag_off & htons(0x3FFF)
+}
+
+function __ip_skb_tot_len:long(iphdr)
+{
+        return ntohs(@cast(iphdr, "iphdr", "kernel<linux/ip.h>")->tot_len)
+}
+
+global mac_etype_len = 14
+function vi_skb_mac:long(skb:long, offset:long)
+%{
+        struct sk_buff *skb = (struct sk_buff *)STAP_ARG_skb;
+        long off = STAP_ARG_offset;
+        long ret;
+
+        unsigned char *p;
+        if(skb_mac_header_was_set(skb))
+                p = skb_mac_header(skb);
+        else
+                p = skb_network_header(skb) - mac_etype_len;
+
+        ret = ((long)p[0+off])<<40 | ((long)p[1+off])<<32 | ((long)p[2+off])<<24 | ((long)p[3+off])<<16 | ((long)p[4+off])<<8 | ((long)p[5+off]);
+        STAP_RETVALUE = ret;
+%}
+
+function vi__get_iphdr_tcphdr:long(iphdr:long)
+{
+        ihl=@cast(iphdr, "iphdr", "kernel<linux/ip.h>")->ihl
+        tcphdr = iphdr + ihl * 4
+        return tcphdr
+}
+
+#this function can only be used at boundary between NIC driver and Linux-Network!
+#type: 0 for output, 1 for input
+function vi__get_skb_iphdr:long(skb:long, type:long)
+{
+	nwhr = @cast(skb, "sk_buff")->network_header
+        if(type==1 && nwhr==0){ #workaround for some NIC driver
+                iphdr = data
+        }else{
+                iphdr = __get_skb_iphdr(skb)
+        }
+}
+
+probe kernel.function("__netif_receive_skb") {
+        vi_show($skb, 1, gIfIndex)
+}
+
+probe kernel.function("dev_queue_xmit") {
+	vi_show($skb, 0, gIfIndex)
+}
+
+function vi_get_dir:long(iphdr:long)
+{
+        #dir: 0: client->server, 1: server->client, -1: not my flow
+
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+        tcphdr = vi__get_iphdr_tcphdr(iphdr)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+        if(sport==gServerPort && saddr==gServerIp && daddr==gClientIp) {
+                dir = 1
+        } else if(dport==gServerPort && daddr==gServerIp && saddr==gClientIp) {
+                dir = 0
+        } else {
+                dir = -1
+        }
+        return dir
+}
+
+global devBytes
+global devPackets
+function vi_show(skb:long, type:long, ifidx:long) {
+        ptype = ntohs(@cast(skb, "sk_buff")->protocol)
+        if(ptype == 0x0800){    #only for IP packets
+                ifindex = @cast(skb, "sk_buff")->dev->ifindex
+                if(ifindex==ifidx){
+                        iphdr = vi__get_skb_iphdr(skb, type)
+                        proto = __ip_skb_proto(iphdr)
+                        if(proto == 0x06){      #only for TCP packets
+                                len = @cast(skb, "sk_buff")->len
+                                #dir = vi_get_dir(iphdr)
+                                #if(dir == -1) {
+                                #        return -1
+                                #}
+                                saddr = __ip_skb_saddr(iphdr)
+                                daddr = __ip_skb_daddr(iphdr)
+                                tcphdr = vi__get_iphdr_tcphdr(iphdr)
+                                dport = __tcp_skb_dport(tcphdr)
+                                sport = __tcp_skb_sport(tcphdr)
+                                if(sport==gServerPort &&type==0 && saddr==gServerIp && daddr==gClientIp) {
+                                        if(len<60) { len=60 }   #pad for ethernet minimum size 60 by NIC driver
+                                        devBytes[type] += len - mac_etype_len   #decrease MAC header and ETHERTYPE 
+                                } else if(dport==gServerPort && type==1 && daddr==gServerIp && saddr==gClientIp) {
+                                        devBytes[type] += len   #this len is not account for MAC header and ETHERTYPE
+                                } else {
+                                        return 0
+                                }
+
+                                devPackets[type] += 1
+                                vi_show_skb_info_limit(type, skb, iphdr)
+                        }
+                }
+        }
+}
+
+global limit_count = 0
+function vi_show_skb_info_limit(type:long, skb:long, iphdr:long)
+{
+        if(limit_count < 10){
+                limit_count += 1
+                vi_show_skb_info(type, skb, iphdr)
+        }
+}
+
+# type: 0 for output, 1 for input
+function vi_show_skb_info(type:long, skb:long, iphdr:long)
+{
+        head = @cast(skb, "sk_buff")->head
+        data = @cast(skb, "sk_buff")->data
+        thdr = @cast(skb, "sk_buff")->transport_header
+        nhdr = @cast(skb, "sk_buff")->network_header
+        mhdr = @cast(skb, "sk_buff")->mac_header
+
+        ifindex = @cast(skb, "sk_buff")->dev->ifindex
+        printf("type=%d, ifindex=%d, head=%p, data=%p, transport_header=%d, network_header=%d, mac_header=%d, skb->len=%ld\n", type, ifindex, head, data, thdr, nhdr, mhdr, len)
+
+        dmac = vi_skb_mac(skb, 0)
+        smac = vi_skb_mac(skb, 6)
+        proto = __ip_skb_proto(iphdr)
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+
+        tcphdr = vi__get_iphdr_tcphdr(iphdr)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+        printf("\t dmac=%lx, smac=%lx, proto=%d, saddr=%x, daddr=%x, sport=%d, dport=%d\n", dmac, smac, proto, saddr, daddr, sport, dport)
+}
+
+probe kernel.function("ip_fragment"){
+	iphdr = __get_skb_iphdr($skb)
+	proto = __ip_skb_proto(iphdr)
+	saddr = __ip_skb_saddr(iphdr)
+	daddr = __ip_skb_daddr(iphdr)
+	if(proto == 0x06 && daddr==gClientIp && saddr==gServerIp){
+#		myfrag[0] += 1
+		printf("do frag\n")
+	}
+}
+
+#probe kernel.function("ip_rcv") {
+#probe kernel.function("tcp_v4_rcv") {
+probe kernel.function("ip_local_deliver") {
+	iphdr = __get_skb_iphdr($skb)
+	proto = __ip_skb_proto(iphdr)
+	saddr = __ip_skb_saddr(iphdr)
+	daddr = __ip_skb_daddr(iphdr)
+	if(proto == 0x06 && daddr==gServerIp && saddr==gClientIp){
+#ihl=@cast(iphdr, "iphdr", "kernel<linux/ip.h>")->ihl
+#tcphdr = iphdr + ihl * 4
+        tcphdr = __get_skb_tcphdr($skb)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+#        len = @cast($skb, "sk_buff")->len
+	len = __ip_skb_tot_len(iphdr)
+#        data_len = @cast($skb, "sk_buff")->data_len
+#	frag=__ip_skb_frag(iphdr)
+        if(dport==gServerPort){
+		mycountrcv[sport] += len
+		mypktrcv[sport] +=1
+#		if(__tcp_skb_ack(tcphdr)){ 
+#			myack[sport] +=1 
+#		}
+#                if(data_len){myshort[sport]+=1}
+#                if(frag){myfrag[sport]+=1}
+                tcpRcv += len
+        }
+	}
+}
+
+#probe kernel.function("tcp_transmit_skb") {
+#probe kernel.function("tcp_v4_send_ack") {
+#probe kernel.function("tcp_v4_send_reset") {
+#probe kernel.function("ip_build_and_send_pkt") {
+#probe kernel.function("ip_output") {
+probe kernel.function("ip_local_out_sk") {
+#probe kernel.function("__ip_local_out") {
+        __vi_tcp_out($skb)
+}
+
+function __vi_tcp_out(skb){
+        iphdr = __get_skb_iphdr(skb)
+        proto = __ip_skb_proto(iphdr)
+        saddr = __ip_skb_saddr(iphdr)
+        daddr = __ip_skb_daddr(iphdr)
+        if(proto == 0x06 && saddr==gServerIp && daddr==gClientIp){
+        tcphdr = __get_skb_tcphdr(skb)
+        dport = __tcp_skb_dport(tcphdr)
+        sport = __tcp_skb_sport(tcphdr)
+        len = @cast(skb, "sk_buff")->len
+#        data_len = @cast(skb, "sk_buff")->data_len
+#        frag=__ip_skb_frag(iphdr)
+        if(sport==gServerPort){
+		mycountsnd[dport] += len
+		mypktsnd[dport] +=1
+#                if(__tcp_skb_ack(tcphdr)){
+#                        myack[dport] +=1
+#                }
+#		if(data_len){myshort[dport]+=1}
+#                if(frag){myfrag[dport]+=1}
+                tcpSnd += len
+        }
+        }
+}
+
+probe timer.sec(5)
+{
+	printf("%ld, %ld, %ld devrcv, %ld devsnd, %ld bytes rcv, %ld bytes snd\n", devPackets[1], devPackets[0], devBytes[1], devBytes[0], tcpRcv, tcpSnd)
+}
+
+probe end{
+        rcvtotal=0
+        rcvtotalpkt=0
+#        totalack=0
+#        totalshort=0
+#        totalfrag=0
+        foreach(c in mycountrcv){
+                rcvtotal +=mycountrcv[c]
+                rcvtotalpkt +=mypktrcv[c]
+#                totalack +=myack[c]
+#                totalshort +=myshort[c]
+#                totalfrag +=myfrag[c]
+                printf("%ld:%ld rcv-count %ld\n", c, mycountrcv[c], mypktrcv[c])
+        }
+        sndtotal=0
+        sndtotalpkt=0
+        foreach(c in mycountsnd){
+                sndtotal +=mycountsnd[c]
+                sndtotalpkt +=mypktsnd[c]
+                printf("%ld:%ld snd-count %ld\n", c, mycountsnd[c], mypktsnd[c])
+        }
+
+        printf("rcvtotal: %ld, rcv-count %ld, sndtotal:%ld, snd-count %ld\n", rcvtotal, rcvtotalpkt, sndtotal, sndtotalpkt)
+        printf("dev: snd=%ld, rcv=%ld\n", devBytes[0], devBytes[1])
+}
+
