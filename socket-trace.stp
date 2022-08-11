@@ -1,0 +1,38 @@
+#! /usr/bin/env stap
+#Usage1: $0 ssh //only for ssh process
+#Usage2: $0 ""  //for all process
+
+function vi_get_ip_source:string(sock:long)
+{
+    return format_ipaddr(__ip_sock_saddr(sock), __ip_sock_family(sock))
+}
+
+function vi_get_ip_dest:string(sock:long)
+{
+    return format_ipaddr(__ip_sock_daddr(sock), __ip_sock_family(sock))
+}
+
+function vi_get_port_dest:string(sock)
+{
+    return ntohs(sock->__sk_common->skc_dport)
+}
+
+probe begin {
+  printf("STATE:%6s %16s %6s %16s %16s\n",
+         "UID", "CMD", "PID", "SRC", "DST")
+}
+
+probe kernel.{function("tcp_connect")}.return? {
+if(@1 == "" || execname() == @1)
+    printf("open :%6d %16s %6d %16s:%d => %s:%d\n", uid(), execname(), pid(),
+//           vi_get_ip_source($sk), inet_get_local_port($sk), vi_get_ip_dest($sk), vi_get_port_dest($sk))
+           vi_get_ip_source($sk), inet_get_local_port($sk), vi_get_ip_dest($sk), ntohs($sk->__sk_common->skc_dport))
+}
+
+probe kernel.{function("tcp_close")} {
+if(@1 == "" || execname() == @1)
+    printf("close:%6d %16s %6d %16s:%d => %s:%d\n", uid(), execname(), pid(),
+//           vi_get_ip_source($sk), inet_get_local_port($sk), vi_get_ip_dest($sk), vi_get_port_dest($sk))
+           vi_get_ip_source($sk), inet_get_local_port($sk), vi_get_ip_dest($sk), ntohs($sk->__sk_common->skc_dport))
+//           inet_get_ip_source($sk), inet_get_local_port($sk), format_ipaddr($sk->__sk_common->skc_daddr, 2), ntohs($sk->__sk_common->skc_dport))
+}
