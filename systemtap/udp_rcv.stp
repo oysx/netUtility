@@ -1,0 +1,60 @@
+#! /usr/bin/env stap
+
+probe kernel.{function("__udp4_lib_rcv")}.return? {
+    if(execname() =~ "handler?")
+        printf("__udp4_lib_rcv.return: %6d %16s %6d # %x\n", uid(), execname(), pid(), 
+            $return)
+}
+
+probe kernel.{function("__udp4_lib_rcv")} {
+    iphdr = __get_skb_iphdr($skb)
+    saddr = __ip_skb_saddr(iphdr)
+    daddr = __ip_skb_daddr(iphdr)
+
+    if(execname() =~ "handler?")
+        printf("__udp4_lib_rcv:%6d %16s %6d # sk=%x sa=%x da=%x\n", uid(), execname(), pid(),
+            $skb->sk, saddr, daddr)
+}
+
+probe kernel.{function("__udp4_lib_lookup")} {
+    if(execname() =~ "handler?")
+        printf("__udp4_lib_lookup:%6d %16s %6d # sp=%u dp=%u sif=%d dif=%d\n", uid(), execname(), pid(),
+            ntohs($sport), ntohs($dport), $sdif, $dif)
+}
+
+probe kernel.{function("udp4_lib_lookup2")}.return? {
+    if(execname() =~ "handler?")
+        printf("udp4_lib_lookup2:%6d %16s %6d # net=%d sp=%u hnum=%x sif=%d dif=%d ret=%x\n", uid(), execname(), pid(),
+            $net->ifindex, ntohs($sport), $hnum, $sdif, $dif, $return)
+}
+
+probe kernel.{function("__icmp_send")} {
+    if(execname() =~ "handler?")
+        printf("__icmp_send: %6d %16s %6d \n", uid(), execname(), pid())
+}
+
+probe kernel.statement(0xffffffffa4a6def8).absolute {   //This address is inside the kernel function "udp4_lib_lookup2()" which is found via command "crash; dis udp4_lib_lookup2;"
+    if(execname() =~ "handler?")
+        printf("statement: %6d %16s %6d \n", uid(), execname(), pid())
+}
+
+/* OUTPUT example:
+// container's eth0: ifindex=1
+// container's lo: ifindex=32
+// pkg's source IP: 172.17.0.1
+// pkg's destination IP: 172.17.0.2
+// pkt's destination port: 6081
+
+__udp4_lib_rcv:        0         handler4  18130 # sk=0 sa=10011ac da=20011ac
+__udp4_lib_lookup:     0         handler4  18130 # sp=18583 dp=6081 sif=0 dif=32
+udp4_lib_lookup2:      0         handler4  18130 # net=1 sp=18583 hnum=17c1 sif=0 dif=32 ret=0
+statement:             0         handler4  18130
+udp4_lib_lookup2:      0         handler4  18130 # net=1 sp=18583 hnum=17c1 sif=0 dif=32 ret=ffff9498d533a880
+__udp4_lib_rcv.return: 0         handler4  18130 # 0
+
+__udp4_lib_rcv:        0         handler1  18130 # sk=ffff9498d533a880 sa=10011ac da=20011ac
+__udp4_lib_rcv.return: 0         handler1  18130 # 0
+
+__udp4_lib_rcv:        0         handler1  18130 # sk=ffff9498d533a880 sa=10011ac da=20011ac
+__udp4_lib_rcv.return: 0         handler1  18130 # 0
+*/

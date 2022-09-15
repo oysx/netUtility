@@ -1,0 +1,53 @@
+#! /usr/bin/env stap
+
+function vishow_ipv4:string(ip:long)
+{
+    return format_ipaddr(ntohl(ip), 2)
+}
+
+probe module("geneve").{function("geneve_get_v4_rt")}.return? {
+    rtb = $return
+    printf("geneve_get_v4_rt.return:%6d %16s %6d # sa=%s: flag=%x: outfunc=%p\n", uid(), execname(), pid(),
+        format_ipaddr($fl4->saddr, 2), rtb->rt_flags, rtb->dst->output)
+}
+
+probe module("geneve").{function("geneve_get_v4_rt")} {
+    printf("geneve_get_v4_rt:%6d %16s %6d # dp=%d sp=%d \n", uid(), execname(), pid(), 
+        ntohs($dport), ntohs($sport))
+}
+
+probe module("geneve").{function("geneve_xmit")}.return? {
+    printf("geneve_xmit:%6d %16s %6d : skb=%p \n", uid(), execname(), pid(),
+        @entry($skb))
+}
+
+probe kernel.{function("ip_route_output_flow")}.return? {
+    if(execname() =~ "handler?")
+        printf("ip_route_output_flow:%6d %16s %6d # ret=%d net=%d # oif=%d iif=%d, tos=%u, scope=%x flag=%x tunkey=%x uid=%x mark=%x prot=%d da=%s sa=%s dp=%u sp=%u flag=%x\n", uid(), execname(), pid(), 
+            $return->dst->dev->ifindex, 
+            $net->ifindex,
+            $flp4->__fl_common->flowic_oif,
+            $flp4->__fl_common->flowic_iif,
+            $flp4->__fl_common->flowic_tos,
+            $flp4->__fl_common->flowic_scope,
+            $flp4->__fl_common->flowic_flags,
+            $flp4->__fl_common->flowic_tun_key->tun_id,
+            $flp4->__fl_common->flowic_uid->val,
+            $flp4->__fl_common->flowic_mark,
+            $flp4->__fl_common->flowic_proto,
+            format_ipaddr($flp4->daddr, 2),
+            format_ipaddr($flp4->saddr, 2),
+            ntohs($flp4->uli->ports->dport),
+            ntohs($flp4->uli->ports->sport),
+            $flp4->__fl_common->flowic_flags)
+}
+
+/* OUTPUT example:
+// host NIC docker0: ifindex=3
+// host NIC vethdfb2da8: ifindex=35 (outside NIC of the container)
+
+geneve_get_v4_rt:       0         handler2  18130 # dp=6081 sp=18583
+ip_route_output_flow:   0         handler2  18130 # ret=3 net=35 # oif=0 iif=0, tos=0, scope=0 flag=0 tunkey=0 uid=0 mark=80000000 prot=17 da=10.10.1.17 sa=0.0.0.0 dp=6081 sp=18583 flag=0
+geneve_get_v4_rt.return:0         handler2  18130 # sa=98.0.0.0: flag=0: outfunc=0xffffffffa4a39eb0
+geneve_xmit:            0         handler2  18130 : skb=0xffff949937e8e400
+*/
