@@ -17,7 +17,7 @@ probe module("geneve").{function("geneve_get_v4_rt")} {
 }
 
 probe module("geneve").{function("geneve_xmit")}.return? {
-    printf("geneve_xmit:%6d %16s %6d : skb=%p \n", uid(), execname(), pid(),
+    printf("geneve_xmit.return:%6d %16s %6d : skb=%p \n", uid(), execname(), pid(),
         @entry($skb))
 }
 
@@ -49,5 +49,121 @@ probe kernel.{function("ip_route_output_flow")}.return? {
 geneve_get_v4_rt:       0         handler2  18130 # dp=6081 sp=18583
 ip_route_output_flow:   0         handler2  18130 # ret=3 net=35 # oif=0 iif=0, tos=0, scope=0 flag=0 tunkey=0 uid=0 mark=80000000 prot=17 da=10.10.1.17 sa=0.0.0.0 dp=6081 sp=18583 flag=0
 geneve_get_v4_rt.return:0         handler2  18130 # sa=98.0.0.0: flag=0: outfunc=0xffffffffa4a39eb0
-geneve_xmit:            0         handler2  18130 : skb=0xffff949937e8e400
+geneve_xmit.return:     0         handler2  18130 : skb=0xffff949937e8e400
+*/
+
+// Appended probes
+
+
+%{
+#include <net/ip_tunnels.h>
+#include <net/dst_metadata.h>
+%}
+
+function get_ip_tunnel_key:long(skb:long)
+%{
+    struct sk_buff *skb = (struct sk_buff *)STAP_ARG_skb;
+    long ret = (long)&skb_tunnel_info(skb)->key;
+    STAP_RETVALUE = ret;
+%}
+
+probe module("geneve").{function("geneve_xmit")} {
+    key = get_ip_tunnel_key($skb)
+    printf("geneve_xmit: %s %d: tun_id=%d src=%x dst=%x sport=%d dport=%d\n", execname(), pid(),
+        @cast(key, "ip_tunnel_key")->tun_id, @cast(key, "ip_tunnel_key")->u->ipv4->src, @cast(key, "ip_tunnel_key")->u->ipv4->dst, ntohs(@cast(key, "ip_tunnel_key")->tp_src), ntohs(@cast(key, "ip_tunnel_key")->tp_dst))
+}
+
+probe module("geneve").{function("geneve_fill_metadata_dst")} {
+    printf("geneve_fill_metadata_dst\n")
+    print_backtrace()
+}
+
+probe kernel.{function("dev_fill_metadata_dst")} {
+    printf("dev_fill_metadata_dst\n")
+    print_backtrace()
+}
+
+%{
+#include <uapi/linux/openvswitch.h>
+#include "/usr/src/debug/kernel-4.18.0-147.8.1.el8_1/linux-4.18.0-147.8.1.el8_1.x86_64/net/openvswitch/flow.h"
+%}
+
+function get_tunnel_dst:long(attr:long, len:long)
+%{
+    struct nlattr *attr = (struct nlattr*)STAP_ARG_attr;
+    long len = STAP_ARG_len;
+    struct nlattr *a, *ia;
+    int rem;
+    for (a = attr, rem = len; rem > 0; a = nla_next(a, &rem)) {
+        switch (nla_type(a)) {
+            case OVS_ACTION_ATTR_SET:
+                ia = nla_data(a);
+                if (nla_type(ia) == OVS_KEY_ATTR_TUNNEL_INFO){
+                    struct ovs_tunnel_info *tun = nla_data(ia);
+                    STAP_RETVALUE = tun->tun_dst->u.tun_info.key.u.ipv4.dst;
+                }
+            break;
+        }
+    }
+%}
+
+probe module("openvswitch").{function("do_execute_actions")} {
+    info=get_tunnel_dst($attr, $len)
+    if(info){
+        printf("do_execute_actions: %s %d: dst=%x\n", execname(), pid(), info)
+        print_backtrace()
+    }
+}
+
+probe module("geneve").{function("geneve_configure")} {
+    printf("geneve_configure: %s %d: collect_md=%d dst=%x dport=%d\n", execname(), pid(),
+        $metadata, $info->key->u->ipv4->dst, ntohs($info->key->tp_dst))
+    print_backtrace()
+}
+
+probe module("geneve").{function("geneve_nl2info")} {
+    printf("geneve_nl2info: %s %d: data=%d\n", execname(), pid(), $data[2])
+}
+
+/* OUTPUT example:
+//When geneve NIC device created: (it is configured as external controlled)
+geneve_nl2info: ovs-vswitchd 12019: data=0
+geneve_configure: ovs-vswitchd 12019: collect_md=1 dst=0 dport=6081
+ 0xffffffffc0f58d30 : geneve_configure+0x0/0x340 [geneve]
+ 0xffffffffc0f5a2da : geneve_newlink+0xba/0x120 [geneve]
+ 0xffffffff9250d26e : rtnl_newlink+0x5be/0x860 [kernel]
+ 0xffffffff925075d0 : rtnetlink_rcv_msg+0x200/0x2f0 [kernel]
+ 0xffffffff92551a3c : netlink_rcv_skb+0x4c/0x120 [kernel]
+ 0xffffffff9255127e : netlink_unicast+0x19e/0x260 [kernel]
+ 0xffffffff92551544 : netlink_sendmsg+0x204/0x3d0 [kernel]
+ 0xffffffff924d0a8c : sock_sendmsg+0x4c/0x50 [kernel]
+ 0xffffffff924d11bf : ___sys_sendmsg+0x29f/0x300 [kernel]
+ 0xffffffff924d2507 : __sys_sendmsg+0x57/0xa0 [kernel]
+ 0xffffffff91e041cb : do_syscall_64+0x5b/0x1b0 [kernel]
+ 0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel]
+ 0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel] (inexact)
+
+//When traffic go through the OVS and destination is geneve tunnel:
+do_execute_actions: handler1 12019: dst=c9184064
+ 0xffffffffc0cd86a0 : do_execute_actions+0x0/0xbd0 [openvswitch]
+ 0xffffffffc0cd94a8 : ovs_execute_actions+0x48/0x100 [openvswitch]
+ 0xffffffffc0cda891 : ovs_packet_cmd_execute+0x251/0x2a0 [openvswitch]
+ 0xffffffff925537c1 : genl_family_rcv_msg+0x1d1/0x3c0 [kernel]
+ 0xffffffff925539f7 : genl_rcv_msg+0x47/0x8c [kernel]
+ 0xffffffff92551a3c : netlink_rcv_skb+0x4c/0x120 [kernel]
+ 0xffffffff92552204 : genl_rcv+0x24/0x40 [kernel]
+ 0xffffffff9255127e : netlink_unicast+0x19e/0x260 [kernel]
+ 0xffffffff92551544 : netlink_sendmsg+0x204/0x3d0 [kernel]
+ 0xffffffff924d0a8c : sock_sendmsg+0x4c/0x50 [kernel]
+ 0xffffffff924d11bf : ___sys_sendmsg+0x29f/0x300 [kernel]
+ 0xffffffff924d2507 : __sys_sendmsg+0x57/0xa0 [kernel]
+ 0xffffffff91e041cb : do_syscall_64+0x5b/0x1b0 [kernel]
+ 0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel]
+ 0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel] (inexact)
+geneve_xmit:                      handler1  12019: tun_id=0 src=0 dst=c9184064 sport=0 dport=6081
+geneve_get_v4_rt:       0         handler1  12019
+ip_route_output_flow:   0         handler1  12019 : ......
+geneve_get_v4_rt.return:0         handler1  12019 : ......
+geneve_xmit.return:     0         handler1  12019 : ......
+
 */
