@@ -143,8 +143,8 @@ geneve_configure: ovs-vswitchd 12019: collect_md=1 dst=0 dport=6081
  0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel]
  0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel] (inexact)
 
-//When traffic go through the OVS and destination is geneve tunnel:
-do_execute_actions: handler1 12019: dst=c9184064
+//When traffic go through the OVS and destination is geneve tunnel at first time:
+do_execute_actions: handler1 12019: dst=c0184064
  0xffffffffc0cd86a0 : do_execute_actions+0x0/0xbd0 [openvswitch]
  0xffffffffc0cd94a8 : ovs_execute_actions+0x48/0x100 [openvswitch]
  0xffffffffc0cda891 : ovs_packet_cmd_execute+0x251/0x2a0 [openvswitch]
@@ -165,5 +165,37 @@ geneve_get_v4_rt:       0         handler1  12019
 ip_route_output_flow:   0         handler1  12019 : ......
 geneve_get_v4_rt.return:0         handler1  12019 : ......
 geneve_xmit.return:     0         handler1  12019 : ......
+
+//When traffic go through the OVS and destination is geneve tunnel at the following times:(ping command executed)
+do_execute_actions: ping 28070: dst=c0184064
+ 0xffffffffc0cd86a0 : do_execute_actions+0x0/0xbd0 [openvswitch]
+ 0xffffffffc0cd94a8 : ovs_execute_actions+0x48/0x100 [openvswitch]
+ 0xffffffffc0cdcdfd : ovs_dp_process_packet+0x7d/0x130 [openvswitch]
+ 0xffffffffc0cd9433 : clone_execute+0x1c3/0x1f0 [openvswitch]
+ 0xffffffffc0cd8768 : do_execute_actions+0xc8/0xbd0 [openvswitch]
+ 0xffffffffc0cd94a8 : ovs_execute_actions+0x48/0x100 [openvswitch]
+ 0xffffffffc0cdcdfd : ovs_dp_process_packet+0x7d/0x130 [openvswitch]
+ 0xffffffffc0cd9433 : clone_execute+0x1c3/0x1f0 [openvswitch]
+ 0xffffffffc0cd8768 : do_execute_actions+0xc8/0xbd0 [openvswitch]
+ 0xffffffffc0cd94a8 : ovs_execute_actions+0x48/0x100 [openvswitch]
+ 0xffffffffc0cdcdfd : ovs_dp_process_packet+0x7d/0x130 [openvswitch]
+ 0xffffffffc0ce8aec : ovs_vport_receive+0x6c/0xc0 [openvswitch]
+ 0xffffffffc0ce8ce2 : internal_dev_xmit+0x22/0x50 [openvswitch]
+ 0xffffffff924f2f15 : dev_hard_start_xmit+0xa5/0x210 [kernel]
+ 0xffffffff924f37f1 : __dev_queue_xmit+0x6c1/0x9e0 [kernel]
+ 0xffffffff92564670 : ip_finish_output2+0x2e0/0x430 [kernel]
+ 0xffffffff92565f7c : ip_output+0x6c/0xe0 [kernel]
+ 0xffffffff925668a5 : ip_send_skb+0x15/0x40 [kernel]
+ 0xffffffff92590fc4 : raw_sendmsg+0x9e4/0xbf0 [kernel]
+ 0xffffffff92590fc4 : raw_sendmsg+0x9e4/0xbf0 [kernel] (inexact)
+ 0xffffffff924d0a7e : sock_sendmsg+0x3e/0x50 [kernel] (inexact)
+ 0xffffffff924d206e : __sys_sendto+0xee/0x160 [kernel] (inexact)
+ 0xffffffff924d2104 : __x64_sys_sendto+0x24/0x30 [kernel] (inexact)
+ 0xffffffff91e041cb : do_syscall_64+0x5b/0x1b0 [kernel] (inexact)
+ 0xffffffff928000ad : entry_SYSCALL_64_after_hwframe+0x65/0xca [kernel] (inexact)
+geneve_xmit:                              ping 28070: ......
+geneve_get_v4_rt:           0             ping  28070
+geneve_get_v4_rt.return:    0             ping  28070 : ......
+geneve_xmit.return:         0             ping  28070 : ......
 
 */
