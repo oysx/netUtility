@@ -61,6 +61,15 @@ get_docker_ip(){
         echo $(docker inspect --format '{{ .NetworkSettings.IPAddress }}' $1)
 }
 
+get_docker_mac(){
+        echo $(docker inspect --format '{{ .NetworkSettings.MacAddress }}' $1)
+}
+
+get_docker_nic(){
+        docker exec $1 ip route|grep default|cut -d\  -f5
+}
+
+# The following two methods are exclusive and be choiced only one
 policy_routing(){
         #in host, do policy routing
         local docker_ip=$(get_docker_ip $1)
@@ -69,6 +78,21 @@ policy_routing(){
         ip rule add ipproto udp dport $OUT_UDP_PORT to $PEER_IP lookup 7
         ip rule list
         ip route add default via $docker_ip table 7
+}
+
+tc_redirect(){
+        #in host, do tc change dmac and redirect packet
+        local docker_mac=$(get_docker_mac $1)
+        echo "container mac: $docker_mac
+        
+        local hostNIC=$(get_nic)
+        local containerNIC=$(get_docker_nic $1)
+        tc qdisc add dev $hostNIC root handle 1: htb
+        tc filter add dev $hostNIC parent 1: protocol ip u32 \
+                match ip dst $PEER_IP \
+                match u16 $OUT_UDP_PORT 0xffff at 22 \
+                action skbmod set dmac $docker_mac pipe \
+                action mirred egress redirect dev $containerNIC
 }
 
 main(){
@@ -80,7 +104,10 @@ main(){
                 in_docker $PEER_USER $PEER_PASSWD $PEER_IP $local_ip)
 
         echo "container is $container"
+        
+        # Use policy_routing or tc_redirect, not both
         policy_routing $container
+        #tc_redirect
 }
 
 $1
