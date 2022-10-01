@@ -65,8 +65,10 @@ get_docker_mac(){
         echo $(docker inspect --format '{{ .NetworkSettings.MacAddress }}' $1)
 }
 
-get_docker_nic(){
-        docker exec $1 ip route|grep default|cut -d\  -f5
+get_docker_peer_nic(){
+        local in_nic=$(docker exec $1 ip route|grep default|cut -d\  -f5)
+        local out_ifindex=$(docker exec $1 ip -j link show $in_nic |jq '.[].link_index')
+        echo $(ip link | grep "^$out_ifindex:" | cut -d\  -f2 | cut -d\@ -f1)
 }
 
 # The following two methods are exclusive and be choiced only one
@@ -83,10 +85,10 @@ policy_routing(){
 tc_redirect(){
         #in host, do tc change dmac and redirect packet
         local docker_mac=$(get_docker_mac $1)
-        echo "container mac: $docker_mac
+        echo "container mac: $docker_mac"
         
         local hostNIC=$(get_nic)
-        local containerNIC=$(get_docker_nic $1)
+        local containerNIC=$(get_docker_peer_nic $1)
         tc qdisc add dev $hostNIC root handle 1: htb
         tc filter add dev $hostNIC parent 1: protocol ip u32 \
                 match ip dst $PEER_IP \
@@ -107,7 +109,7 @@ main(){
         
         # Use policy_routing or tc_redirect, not both
         policy_routing $container
-        #tc_redirect
+        #tc_redirect $container
 }
 
 $1
