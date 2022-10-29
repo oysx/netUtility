@@ -102,6 +102,10 @@ tc_redirect(){
                 action skbmod set dmac $docker_mac pipe \
                 action mirred egress redirect dev $containerNIC
 
+        #disable tx checksum offloading on both NICs to workaround the checksum error caused by TC mechanism:
+	echo "Use following command to workaround checksum error issue:"
+	echo "  ethtool --offload eth0 tx off"
+	
 	#remove setting:
 	echo "Use following commands to undo:"
 	echo "  tc qdisc del dev $hostNIC root"
