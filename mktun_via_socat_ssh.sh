@@ -40,7 +40,7 @@ in_docker(){
 
         socat -lf $LOG_DIR/socat-in.log -d -d tcp4-l:$IN_TCP_PORT,reuseaddr,fork,keepalive UDP4:$OUTER_IP:$IN_UDP_PORT &
 
-        socat -lf $LOG_DIR/socat-out.log -d -d UDP4-LISTEN:$OUT_UDP_PORT,fork tcp4:localhost:$OUT_TCP_PORT,keepalive &
+        socat -lf $LOG_DIR/socat-out.log -d -d UDP4-RECVFROM:$OUT_UDP_PORT,fork tcp4:localhost:$OUT_TCP_PORT,keepalive &
 
         #do DNAT
         iptables -t nat -A PREROUTING -p udp --dport $OUT_UDP_PORT -j DNAT --to-destination $INNER_IP:$OUT_UDP_PORT
@@ -80,6 +80,12 @@ policy_routing(){
         ip rule add ipproto udp dport $OUT_UDP_PORT to $PEER_IP lookup 7
         ip rule list
         ip route add default via $docker_ip table 7
+	ip route list table 7
+
+	#remove setting:
+	echo "Use following commands to undo:"
+	echo "  ip rule del to $PEER_IP ipproto udp dport $OUT_UDP_PORT lookup 7"
+	echo "  ip route del default table 7"
 }
 
 tc_redirect(){
@@ -95,6 +101,10 @@ tc_redirect(){
                 match u16 $OUT_UDP_PORT 0xffff at 22 \
                 action skbmod set dmac $docker_mac pipe \
                 action mirred egress redirect dev $containerNIC
+
+	#remove setting:
+	echo "Use following commands to undo:"
+	echo "  tc qdisc del dev $hostNIC root"
 }
 
 main(){
