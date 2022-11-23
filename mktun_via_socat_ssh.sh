@@ -5,13 +5,16 @@
 #   CONTAINER.export_port(7771) => CONTAINER.socat(TCP.7771 <-> HOST.UDP.6081) => HOST.APP.recv(UDP:6081)
 # %DOCKER-IMAGE%: must have "socat" program and "iptables" and "sshpass" and "ssh"
 
+#Usage: on first pair nodes: VIOUT=7770 VIIN=7771 ./mktun_via_socat_ssh.sh main <user> <password> <remote ip>
+#	on second pair nodes: VIOUT=7772 VIIN=7773 ./mktun_via_socat_ssh.sh main <user> <password> <remote ip>
+
 if (( $# < 4 )); then
         echo "Usage: $0 main <peer_user> <peer_password> <peer_ip> [local_ip]"
         exit 1
 fi
 
-OUT_TCP_PORT=7770
-IN_TCP_PORT=7771
+OUT_TCP_PORT=${VIOUT:-7770}
+IN_TCP_PORT=${VIIN:-7771}
 OUT_UDP_PORT=6081
 IN_UDP_PORT=6081
 LOG_DIR=${HOME}
@@ -41,6 +44,7 @@ in_docker(){
         socat -lf $LOG_DIR/socat-in.log -d -d tcp4-l:$IN_TCP_PORT,reuseaddr,fork,keepalive UDP4:$OUTER_IP:$IN_UDP_PORT &
 
         socat -lf $LOG_DIR/socat-out.log -d -d UDP4-RECVFROM:$OUT_UDP_PORT,fork tcp4:localhost:$OUT_TCP_PORT,keepalive &
+        #socat -lf $LOG_DIR/socat-out.log -d -d UDP4-LISTEN:$OUT_UDP_PORT,fork tcp4:localhost:$OUT_TCP_PORT,keepalive &
 
         #do DNAT
         iptables -t nat -A PREROUTING -p udp --dport $OUT_UDP_PORT -j DNAT --to-destination $INNER_IP:$OUT_UDP_PORT
@@ -79,7 +83,8 @@ policy_routing(){
 
         ip rule add ipproto udp dport $OUT_UDP_PORT to $PEER_IP lookup 7
         ip rule list
-        ip route add default via $docker_ip table 7
+	ip route list table 7
+        ip route add $PEER_IP via $docker_ip table 7
 	ip route list table 7
 
 	#remove setting:
@@ -102,19 +107,15 @@ tc_redirect(){
                 action skbmod set dmac $docker_mac pipe \
                 action mirred egress redirect dev $containerNIC
 
-        #disable tx checksum offloading on both NICs to workaround the checksum error caused by TC mechanism:
-	echo "Use following command to workaround checksum error issue:"
-	echo "  ethtool --offload eth0 tx off"
-	
 	#remove setting:
 	echo "Use following commands to undo:"
-	echo "  tc qdisc del dev $hostNIC root"
+	echo "tc qdisc del dev $hostNIC root"
 }
 
 main(){
         # in host, run docker contains above setting
         local local_ip=$(get_ip)
-        local container=$(docker run -dt --rm --privileged -p$IN_TCP_PORT:$IN_TCP_PORT -v$ME:/root/mktun_via_socat_ssh.sh \
+        local container=$(docker run -dt -e VIOUT=$VIOUT -e VIIN=$VIIN --rm --privileged -p$IN_TCP_PORT:$IN_TCP_PORT -v$ME:/root/mktun_via_socat_ssh.sh \
                 vilocal.vpn \
                 /root/mktun_via_socat_ssh.sh \
                 in_docker $PEER_USER $PEER_PASSWD $PEER_IP $local_ip)
