@@ -1,0 +1,18 @@
+Tips 1:
+Problem: Some type/protocol packets are blocked in the network, but we don't which network device block it. How to find out which segment in the network block it?
+Symptom: After the TCP connection is established(3 handshakes), the first application packet is blocked(receive RST from peer).
+How to: Leverage TTL in the packet to try to find out which segment in the network block it. Just like traceroute does.
+Steps:
+  1. traceroute -T -p ${PORT} ${DIP}  # get the segments between target ${DIP} and myself
+    Example output:
+    1 xxx
+    2 yyy
+    3 zzz
+    4 mmm
+    5 ${DIP}
+  2. in Console-A: tcpdump -i eth0 -w network-issue.pcap host ${DIP} or icmp  # dump packets sent to target and possible ICMP packets with TTL expire
+  3. in Console-B: iptables -t mangle -A POSTROUTING -p tcp -d ${DIP} -m tcp --tcp-flags PSH PSH -j TTL --ttl-set ${TTL}  # to change the application packet's TTL to desired value
+  4. in Console-C: Run application to send out TCP packets to server and check the dump packets with wireshark.
+  5. Repeat from step 2 to setp 4 for different TTL value (increase from 1) and check with dumped packets to check which TTL will cause the ICMP TTL-expire packet disappear and the RST packet received. That TTL or segment is what we want.
+     For example, if TTL=1~3 will receive ICMP packet and TTL=4~5 will receive RST packet, it means the segment (mmm) block the application packets.
+===============================================================================
